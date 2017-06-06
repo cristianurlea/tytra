@@ -12,21 +12,43 @@ import qualified Transform
 import           Control.Monad            (forM, liftM)
 import           Control.Monad.State
 import           Text.Dot
+import           Debug.Trace
+import qualified Data.HashMap.Strict
 
-type NodeManagement = State Node
+type NodeManagement = State (Node, Data.HashMap.Strict.HashMap String Node)
+
 genNodeId :: NodeManagement Node
 genNodeId = do
-    n <- get
-    put (n+1)
+    (n,x) <- get
+    put ((n+1),x)
     return n
+
+
+insDef :: String -> Node -> NodeManagement ()
+insDef str gr = do
+  (n,x) <- get
+  put ((n), (Data.HashMap.Strict.insert str gr x))
+  return ()
 
 createNode :: String -> NodeManagement (LNode String)
 createNode label = do
   iid <- genNodeId
   return (iid, label)
 
-createEdge :: LNode String -> LNode String -> String -> NodeManagement (LEdge String)
-createEdge (x,_) (y,_) label = return (x,y,label)
+findOrCreate :: String ->  NodeManagement (LNode String)
+findOrCreate label = do
+   (n,mp) <- get
+   case (Data.HashMap.Strict.lookup label mp) of
+     Nothing -> do
+        (nd, ln) <- createNode label
+        insDef label nd
+        return (nd, ln)
+     Just y -> do
+        return (y,label)
+
+
+createEdge :: LNode String -> LNode String -> String -> (LEdge String)
+createEdge (x,_) (y,_) label = (x,y,label)
 -- mkGraph :: [LNode a] -> [LEdge b] -> gr a
 
 maxNode :: Gr a b -> Node
@@ -34,217 +56,171 @@ maxNode gr = case nodeRange gr  of
               (_,max) -> max
 
 
--- type Context a b = (Adj b, Node, a, Adj b)
--- type Adj b = [(b, Node)]
-
---exprtoCont (AST.Var name ty) maxNode =
---exprToCont :: AST.Expr -> Node ->  Context String String
-
-
--- expand :: AST.Expr -> Node-> NodeManagement (Context String String)
--- expand (AST.Var name ty) outerNode =
-
-
-
-class ToGraph a where
-  toGr :: a -> NodeManagement (Gr String String)
-
-actionToGraph :: AST.Action -> AST.Expr -> NodeManagement (Gr String String)
-actionToGraph action input =
-  case action of
-    (AST.MOpaque (AST.MkName name) extra _ _ _ ) ->
-      do
-        n <- get
-        nd <- createNode $ "func " ++ name
-        extraGr <- mapM toGr extra
-        let
-          eNodesLst = mapM labNodes extraGr
-          heads = map head eNodesLst
-          eNodes = Prelude.concat eNodesLst
-          eEdges = Prelude.concat $ mapM labEdges extraGr
-          in
-            do
-             edgs <- mapM ( \(x,y) -> createEdge x nd (show $ inferType y)) $ zip heads extra
-             return $ mkGraph (nd:eNodes) $ eEdges++edgs
-
-    (AST.FOpaque _ (AST.MkName name) _ acc  _ _ _ ) ->
-      do
-        nd <- createNode name
-        acn <- toGr acc
-        let acns = labNodes acn
-            acne = labEdges acn
-            in
-              do
-                edg <- createEdge (head acns) nd (show $ inferType acc)
-                return $ mkGraph (nd:acns) (edg:acne)
-
-    (AST.Compose acts) ->
-      case acts of
-        [] -> do
-          fake <- createNode "end"
-          return $ mkGraph [] []
-        x:xs -> do
-          nd <- actionToGraph x input
-          rstGraph <- actionToGraph (AST.Compose xs) input
-          let ndNodes = labNodes nd
-              rstNodes = labNodes rstGraph
-            in
-              if (xs /= [])
-               then do
-                  edg <-  createEdge (head rstNodes) (head ndNodes) "" --(show $ (typeOfAction action) $ inferType input)
-                  return $ mkGraph (ndNodes ++ rstNodes) $ edg:(labEdges rstGraph ++ labEdges nd)
-               else
-                  return $ mkGraph (ndNodes ++ rstNodes) $  labEdges nd
-
-    (AST.PNDMap _ act) ->
-      do
-        nd <- createNode "map"
-        actGraph <- actionToGraph act input
-        let
-          actNodes = labNodes actGraph
-          in
-            do
-              edg <- createEdge (head actNodes) nd "" -- (show (typeOfAction action (inferType input)))
-              return $ mkGraph (actNodes++[nd]) $ edg:labEdges actGraph
-    (AST.NDMap fctrs var act) ->
-        do
-          nd <- createNode $ "map " ++ show fctrs ++ " " ++ show var
-          actGraph <- actionToGraph act input
-          let
-            actNodes = labNodes actGraph
-            in
-              do
-                edg <- createEdge (head actNodes) nd "" -- (show (typeOfAction action (inferType input)))
-                return $ mkGraph (actNodes++[nd]) $ edg:labEdges actGraph
-    (AST.PNDFold fctrs act) ->
-      do
-        nd <- createNode $ "fold " ++ show fctrs
-        actGraph <- actionToGraph act input
-        let
-          actNodes = labNodes actGraph
-          in
-            do
-              edg <- createEdge (head actNodes) nd (show $ (typeOfAction action) $ inferType input)
-              return $ mkGraph (actNodes++[nd]) $ edg:labEdges actGraph
-
-    (AST.NDFold fctrs var act) ->
-        do
-          nd <- createNode $ "fold" ++ show fctrs ++ " " ++ show var
-          actGraph <- actionToGraph act input
-          let
-            actNodes = labNodes actGraph
-            in
-              do
-                edg <- createEdge (head actNodes) nd (show $ (typeOfAction action) $ inferType input)
-                return $ mkGraph (actNodes++[nd]) $ edg:labEdges actGraph
-    (AST.NDSplit ints) ->
-      do
-        nd <- createNode $ "split" ++ show ints
-        return $ mkGraph [nd] []
-    (AST.NDDistr sFctrs mFctrs) ->
-      do
-        nd <- createNode $ "distr" ++ show sFctrs ++ " " ++ show mFctrs
-        return $ mkGraph [nd] []
-
-    (AST.NDMerge ints) ->
-      do
-        nd <- createNode $ "merge" ++ show ints
-        return $ mkGraph [nd] []
-
-    (AST.NDZipT ints) ->
-      do
-         -- nd <- createNode $ "zip" ++ show ints
-        inGraph <- toGr input
-        let
-          inodes = labNodes inGraph
-          redges = labEdges inGraph
-          in
-            do
-              -- edg <- createEdge (head inodes) nd (show $ inferType input)
-              return $ mkGraph (inodes) (redges)
-
-    (AST.NDUnzipT ints) ->
-      do
-        nd <- createNode $ "unzip" ++ show ints
-        inGraph <- toGr input
-        let
-          inodes = labNodes inGraph
-          redges = labEdges inGraph
-          in
-            do
-              edg <- createEdge nd (head inodes)  (show $ inferType input)
-              return $ mkGraph (nd:inodes) (edg:redges)
-
-    (AST.Let lhs rhs) ->
-      do
-        lhsGraph <- toGr lhs
-        rhsGraph <- toGr rhs
-        let lnodes = labNodes lhsGraph
-            rnodes = labNodes rhsGraph
-            in
-              do
-                edg <- createEdge (head rnodes) (head lnodes) (show $ inferType rhs)
-                return $ mkGraph (lnodes ++ rnodes) $ [edg] ++ labEdges lhsGraph ++ labEdges rhsGraph
-
-    (AST.Loop start stop step act ) ->
-      do
-        nd <- createNode $ "loop start:" ++ show start ++ "stop: " ++ show stop ++ " step: " ++ show step
-        actGraph <- actionToGraph act input
-        let
-          actNodes = labNodes actGraph
-          in
-            do
-              edg <- createEdge nd (head actNodes)  (show $ (typeOfAction action) $ inferType input)
-              return $ mkGraph (actNodes++[nd]) $ edg:labEdges actGraph
-
-    -- _ ->
-    --    do
-    --     n <- get
-    --     nd <- createNode $ "action" ++ show n
-    --     return $ mkGraph [nd] []
-
-instance ToGraph AST.Expr where
-  toGr node@(AST.Var (AST.MkName name) ty) = do
-    nd <- createNode $ name
-    return $ mkGraph [nd] []
-
-  toGr node@(AST.Res act expr) = do
-    nd <- actionToGraph act expr
-    actGraph <- actionToGraph act expr
-    exprGraph <- toGr expr
-    let exprNodes = labNodes exprGraph
-        actNodes = labNodes actGraph
+mpFoldHelper :: LNode String -> AST.Action -> NodeManagement GrNode
+mpFoldHelper nd action = do
+  (iOutNodes, iNodes, iInNodes, iEdges) <- actionToGr action
+  let edgs = map (\y -> createEdge y nd "fixme")  iOutNodes
       in
-        do
-          edg <- createEdge (head exprNodes) (head actNodes) (show (inferType expr) ++ (show $ Cost.computeExprCost expr)  ++ "depth: " ++  (show $ Transform.depth expr) )
-          return $ mkGraph (actNodes ++ exprNodes) $ edg:(labEdges exprGraph ++ labEdges actGraph)
+        return ([nd], nd:iNodes, iInNodes, edgs++iEdges)
 
-  toGr node@(AST.Tup exprs) = do
-      exprGraph <- mapM toGr exprs
-      nd <- createNode $ "tuple of"
-      let exprNodesLst = map labNodes exprGraph
-          exprEdgesLst = map labEdges exprGraph
-          in do
-            edgs <- mapM ( \z -> createEdge z nd "asdf") (map head exprNodesLst)   --(show $ inferType expr)
-            return $ mkGraph (nd:(concat exprNodesLst)) $ edgs ++ (concat exprEdgesLst)
+actionToGr :: AST.Action -> NodeManagement GrNode
 
-  -- toGr _ = do
-  --     lhsNode <- createNode "Output"
-  --     rhsNode <- createNode "Empty"
-  --     edge <- createEdge rhsNode lhsNode "Str"
-  --     return $ mkGraph [lhsNode,rhsNode] [edge]
+actionToGr (AST.MOpaque (AST.MkName name) extra _ _ _ ) = do
+  nd <- createNode $ name
+  extraGrphs <- mapM exprToGr extra
+  let edgs = map (\(y,yty) -> createEdge y nd (show $ inferType yty))  $ zip (concatMap outNodes extraGrphs) extra
+      in
+        return $ foldGrKeepIO  ([nd], [nd], [nd], edgs) extraGrphs
+
+actionToGr (AST.FOpaque _ (AST.MkName name) extra acc  _ _ _ ) = do
+  nd <- createNode name
+  extraGrphs <- mapM exprToGr $ acc:extra
+  let edgs = map (\(y,yty) -> createEdge y nd (show $ inferType yty))  $ zip (concatMap outNodes extraGrphs) $ acc:extra
+      in
+        return $ foldGrKeepIO  ([nd], [nd], [nd], edgs) extraGrphs
 
 
-instance ToGraph AST.Assignment where
-  toGr (AST.Assign lhs rhs) = do
-    lhsGraph <- toGr lhs
-    rhsGraph <- toGr rhs
-    let lnodes = labNodes lhsGraph
-        rnodes = labNodes rhsGraph
+actionToGr (AST.PNDMap fctrs action) = do
+  nd <- createNode $ "map " ++ show fctrs
+  (iOutNodes, iNodes, iInNodes, iEdges) <- actionToGr action
+  let edgs = map (\y -> createEdge y nd "fixme map")  iOutNodes
+      in
+        return ([nd], nd:iNodes, [nd], edgs++iEdges)
+
+
+actionToGr (AST.PNDFold fctrs action) = do
+  nd <- createNode $ "fold " ++ show fctrs
+  (iOutNodes, iNodes, iInNodes, iEdges) <- actionToGr action
+  let edgs = map (\y -> createEdge y nd "fixme fold")  iOutNodes
+      in
+        return ([nd], nd:iNodes, [nd], edgs++iEdges)
+
+actionToGr (AST.NDMap fctrs var action ) = do
+  nd <- createNode $ "map " ++ show var ++ " " ++ show fctrs
+  (iOutNodes, iNodes, iInNodes, iEdges) <- actionToGr action
+  let edgs = map (\y -> createEdge y nd "fixme")  iOutNodes
+      in
+        return ([nd], nd:iNodes, [nd], edgs++iEdges)
+
+actionToGr (AST.NDFold fctrs var action ) = do
+  nd <- createNode $ "fold " ++ show var ++ " " ++ show fctrs
+  (iOutNodes, iNodes, iInNodes, iEdges) <- actionToGr action
+  let edgs = map (\y -> createEdge y nd "fixme nd fold")  iOutNodes
+      in
+        return ([nd], nd:iNodes, [nd], edgs++iEdges)
+
+actionToGr (AST.NDSplit fctrs) = do
+  nd <- createNode $ "split " ++ show fctrs
+  return ([nd],[nd],[nd],[])
+
+actionToGr (AST.NDMerge fctrs) = do
+  nd <- createNode $ "merge " ++ show fctrs
+  return ([nd],[nd],[nd],[])
+
+actionToGr (AST.NDDistr sfctrs mfctrs) = do
+  nd <- createNode $ "distr " ++ show sfctrs ++ " " ++ show mfctrs
+  return ([nd],[nd],[nd],[])
+
+actionToGr (AST.NDZipT fctrs ) = do
+  nd <- createNode $ "zip " ++ show fctrs
+  return ([nd],[nd],[nd],[])
+
+actionToGr (AST.NDUnzipT fctrs ) = do
+  nd <- createNode $ "unzip " ++ show fctrs
+  return ([nd],[nd],[nd],[])
+
+actionToGr (AST.Compose actions) = do
+    nd <- createNode $ "Compose "
+    actionNodes <- mapM actionToGr actions
+    return $ chainGr actionNodes nd
+
+actionToGr (AST.Loop start stop step action) = do
+  nd <- createNode $ "loop "
+  actionNode <- actionToGr action
+  return $ chainGr [actionNode] nd
+
+actionToGr node@(AST.Let lhs rhs) = trace(show node) $ do
+  (lOutNodes, lNodes, lInNodes, lEdges) <- exprToGr lhs
+  (rOutNodes, rNodes, rInNodes, rEdges) <- exprToGr rhs
+  let edgs = map (\y -> (map (\z -> createEdge y z ("asdzf " ++ (show $ inferType rhs))) lInNodes)) rOutNodes
+      in
+        return $ (lOutNodes, (lNodes ++ rNodes), rInNodes , lEdges ++ rEdges   )
+
+
+actionToGr act = do
+  nd <- findOrCreate "action"
+  return $  ([nd],[nd],[nd],[])
+
+
+chainGr   :: [GrNode] -> LNode String ->  GrNode
+chainGr [] nd =  ([nd],[nd],[nd],[])
+chainGr (x:xs) nd =
+  do
+    let (lOutNodes, lNodes, lInNodes, lEdges) = x
+        (rOutNodes, rNodes, rInNodes, rEdges) = chainGr xs nd
+        edgs =  map (\y -> (map (\z -> createEdge y z "fixme 2") lInNodes) ) rOutNodes
         in
-          do
-            edg <- createEdge (head rnodes) (head lnodes) (show $ inferType rhs)
-            return $ mkGraph (lnodes ++ rnodes) $ [edg] ++ labEdges lhsGraph ++ labEdges rhsGraph
+          ([nd], [nd] ++ lNodes ++ rNodes , rInNodes,  (concat edgs) ++ lEdges ++ rEdges)
+
+
+type GrNode = ([LNode String],[LNode String],[LNode String], [LEdge String])
+
+addGrPart :: GrNode -> GrNode -> GrNode
+addGrPart (lOutNodes, lNodes, lInNodes, lEdges)
+          (rOutNodes, rNodes, rInNodes, rEdges)
+          =
+            (lOutNodes ++ rOutNodes, lNodes ++ rNodes, lInNodes ++ rInNodes, lEdges ++ rEdges)
+
+foldGrKeepIO :: GrNode -> [GrNode] -> GrNode
+foldGrKeepIO acc [] = acc
+foldGrKeepIO acc (x:xs) =
+  let (lOutNodes, lNodes, lInNodes, lEdges) = acc
+      (rOutNodes, rNodes, rInNodes, rEdges) = x
+      in
+          (lOutNodes , lNodes ++ rNodes, lInNodes, lEdges ++ rEdges)
+
+outNodes :: ([LNode String],[LNode String],[LNode String], [LEdge String]) -> [LNode String]
+outNodes (lOutNodes, lNodes, lInNodes, lEdges) = lOutNodes
+
+exprToGr :: AST.Expr -> NodeManagement ([LNode String],[LNode String],[LNode String], [LEdge String])
+
+exprToGr (AST.Var (AST.MkName name) ty) = do
+  nd <- findOrCreate $ name
+  return ([nd], [nd] , [nd] , [])
+
+exprToGr (AST.Res action input) =
+  case action of
+    (AST.Let lhs rhs) -> do
+      (iOutNodes, iNodes, iInNodes, iEdges) <- exprToGr input
+      (lOutNodes, lNodes, lInNodes, lEdges) <- exprToGr lhs
+      (rOutNodes, rNodes, rInNodes, rEdges) <- exprToGr rhs
+
+      let edgs = map (\y -> (map (\z -> createEdge y z (show $ inferType input)) lInNodes)) iOutNodes
+          in
+            return $ ( rOutNodes, iNodes ++ lNodes ++ rNodes, rInNodes , rEdges ++ lEdges ++ iEdges ++ concat edgs )
+    _ -> do
+      (iOutNodes, iNodes, iInNodes, iEdges) <- exprToGr input
+      (actOutNodes, actNodes, actInNodes, actEdges) <- actionToGr action
+      let edgs = map (\y -> (map (\z -> createEdge y z (show $ inferType input)) actInNodes)) iOutNodes
+          in
+            return $ ( actOutNodes, iNodes ++ actNodes, iInNodes , actEdges ++ iEdges ++ concat edgs )
+
+exprToGr (AST.Tup exprs) = do
+  grphs <- mapM exprToGr exprs
+  let tupGr = foldl addGrPart ([],[],[],[])  grphs
+      in
+        trace(show tupGr) $
+        return $ foldl addGrPart ([],[],[],[])  grphs
+
+
+
+toGr :: AST.Assignment -> NodeManagement (Gr String String)
+toGr (AST.Assign lhs rhs) = do
+  (lOutNodes, lNodes, lInNodes, lEdges) <- exprToGr lhs
+  (rOutNodes, rNodes, rInNodes, rEdges) <- exprToGr rhs
+  let edgs = map (\y -> (map (\z -> createEdge y z (show $ inferType rhs)) lInNodes)) rOutNodes
+      in
+        return $ mkGraph (lNodes ++ rNodes) $ lEdges ++ rEdges ++ (concat edgs)
 
 
 
@@ -253,7 +229,7 @@ instance ToGraph AST.Assignment where
 createDot :: AST.TyTraHLLProgram -> String ->  IO ()
 createDot ast str =
   let
-    graph = evalState (toGr ast) 0
+    graph = evalState (toGr ast) (0, Data.HashMap.Strict.empty)
     dot = showDot (fglToDot graph)
   in
     do
