@@ -56,13 +56,6 @@ maxNode gr = case nodeRange gr  of
               (_,max) -> max
 
 
-mpFoldHelper :: LNode String -> AST.Action -> NodeManagement GrNode
-mpFoldHelper nd action = do
-  (iOutNodes, iNodes, iInNodes, iEdges) <- actionToGr action
-  let edgs = map (\y -> createEdge y nd "fixme")  iOutNodes
-      in
-        return ([nd], nd:iNodes, iInNodes, edgs++iEdges)
-
 actionToGr :: AST.Action -> NodeManagement GrNode
 
 actionToGr (AST.MOpaque (AST.MkName name) extra _ _ _ ) = do
@@ -83,7 +76,7 @@ actionToGr (AST.FOpaque _ (AST.MkName name) extra acc  _ _ _ ) = do
 actionToGr (AST.PNDMap fctrs action) = do
   nd <- createNode $ "map " ++ show fctrs
   (iOutNodes, iNodes, iInNodes, iEdges) <- actionToGr action
-  let edgs = map (\y -> createEdge y nd "fixme map")  iOutNodes
+  let edgs = map (\y -> createEdge y nd "map")  iOutNodes
       in
         return ([nd], nd:iNodes, [nd], edgs++iEdges)
 
@@ -91,21 +84,21 @@ actionToGr (AST.PNDMap fctrs action) = do
 actionToGr (AST.PNDFold fctrs action) = do
   nd <- createNode $ "fold " ++ show fctrs
   (iOutNodes, iNodes, iInNodes, iEdges) <- actionToGr action
-  let edgs = map (\y -> createEdge y nd "fixme fold")  iOutNodes
+  let edgs = map (\y -> createEdge y nd "fold")  iOutNodes
       in
         return ([nd], nd:iNodes, [nd], edgs++iEdges)
 
 actionToGr (AST.NDMap fctrs var action ) = do
   nd <- createNode $ "map " ++ show var ++ " " ++ show fctrs
   (iOutNodes, iNodes, iInNodes, iEdges) <- actionToGr action
-  let edgs = map (\y -> createEdge y nd "fixme")  iOutNodes
+  let edgs = map (\y -> createEdge y nd "map")  iOutNodes
       in
         return ([nd], nd:iNodes, [nd], edgs++iEdges)
 
 actionToGr (AST.NDFold fctrs var action ) = do
   nd <- createNode $ "fold " ++ show var ++ " " ++ show fctrs
   (iOutNodes, iNodes, iInNodes, iEdges) <- actionToGr action
-  let edgs = map (\y -> createEdge y nd "fixme nd fold")  iOutNodes
+  let edgs = map (\y -> createEdge y nd "fold")  iOutNodes
       in
         return ([nd], nd:iNodes, [nd], edgs++iEdges)
 
@@ -142,7 +135,7 @@ actionToGr (AST.Loop start stop step action) = do
 actionToGr node@(AST.Let lhs rhs) = trace(show node) $ do
   (lOutNodes, lNodes, lInNodes, lEdges) <- exprToGr lhs
   (rOutNodes, rNodes, rInNodes, rEdges) <- exprToGr rhs
-  let edgs = map (\y -> (map (\z -> createEdge y z ("asdzf " ++ (show $ inferType rhs))) lInNodes)) rOutNodes
+  let edgs = map (\y -> (map (\z -> createEdge y z (show $ inferType rhs)) lInNodes)) rOutNodes
       in
         return $ (lOutNodes, (lNodes ++ rNodes), rInNodes , lEdges ++ rEdges   )
 
@@ -158,7 +151,7 @@ chainGr (x:xs) nd =
   do
     let (lOutNodes, lNodes, lInNodes, lEdges) = x
         (rOutNodes, rNodes, rInNodes, rEdges) = chainGr xs nd
-        edgs =  map (\y -> (map (\z -> createEdge y z "fixme 2") lInNodes) ) rOutNodes
+        edgs =  map (\y -> (map (\z -> createEdge  z y "") lInNodes) ) rOutNodes
         in
           ([nd], [nd] ++ lNodes ++ rNodes , rInNodes,  (concat edgs) ++ lEdges ++ rEdges)
 

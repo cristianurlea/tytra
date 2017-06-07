@@ -15,4 +15,4 @@ p_out = let
         s_tmp2 = fold f_acc acc p_tmp
         p_tmp2 = map f_sor p_tmp
   in
-        fold (f_sor2 p_tmp) f_acc p_tmp
+        fold (f_sor2 p_tmp) f_acc p_tmp2

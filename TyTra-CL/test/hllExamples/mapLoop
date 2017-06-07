@@ -15,4 +15,4 @@ p_out = let
         s_tmp2 = fold f_acc acc p_tmp
         p_tmp2 = map f_sor p_tmp
   in
-        loop (1,100,2) (loop (1,1,1) (map (f_sor2 s_tmp2) ))  p_tmp
+        loop (1,100,2) (loop (1,1,1) (map (f_sor2 s_tmp2) ))  p_tmp2
