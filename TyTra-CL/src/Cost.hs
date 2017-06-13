@@ -49,173 +49,138 @@ maxLatencySumResource   MkRawCost { delay = d1, latency = l1, size = s1}
   RawCOst
 
 -}
+
+
+
+
+costlyMcCostFace :: Expr -> RawCost
+costlyMcCostFace (Var _ ty) = computeTypeCost ty
+
+
+
+
+finishAt :: RawCost -> Cycle
+finishAt MkRawCost { delay = id1, latency = il1, size = is1} = il1 + id1
+
+
+linearCost :: Integer -> RawCost -> RawCost -> RawCost
+linearCost fctr actionCost inputCost =
+  let
+      MkRawCost { delay = ad, latency = al, size = as} = actionCost
+      MkRawCost { delay = ind, latency = inl, size = ins} = inputCost
+      finishInputTime = finishAt inputCost
+      thisLatency = maximum [finishInputTime, al]
+      in
+        MkRawCost {delay = ad * fctr, latency = thisLatency, size = as + ins}
+
+
+ndMapCost :: [(Integer, MVariant)] -> Integer -> MVariant -> RawCost -> RawCost -> RawCost
+ndMapCost fctrs inputSize bvar actionCost inputCost =
+  let
+      MkRawCost { delay = ad, latency = al, size = as} = actionCost
+      MkRawCost { delay = ind, latency = inl, size = ins} = inputCost
+      finishInputTime = finishAt inputCost
+      thisLatency = maximum [finishInputTime, al]
+      in
+        case (fctrs, bvar) of
+          ([],Seq)  -> MkRawCost {delay = ad * inputSize, latency = thisLatency, size = as + ins}
+          ([],Par)  -> MkRawCost {delay = ad , latency = thisLatency, size = (as * fromInteger inputSize) + ins}
+          ([],Pipe)  -> MkRawCost {delay = inputSize, latency = thisLatency + (ad * inputSize), size = (as * fromInteger inputSize) + ins}
+          ((x, tv):xs, bbvar) -> let thisCost = ndMapCost [] x tv actionCost 0
+                                     thatCost = ndMapCost xs (inputSize `div` x) bbvar actionCost inputCost
+                                     in
+                                          thisCost * thatCost
+
+
+ndFoldCost :: [(Integer, FVariant)] -> Integer -> FVariant -> RawCost -> RawCost -> RawCost
+ndFoldCost fctrs inputSize bvar actionCost inputCost =
+  let
+    MkRawCost { delay = ad, latency = al, size = as} = actionCost
+    MkRawCost { delay = ind, latency = inl, size = ins} = inputCost
+    finishInputTime = finishAt inputCost
+    thisLatency = maximum [finishInputTime, al]
+    in
+      case (fctrs, bvar) of
+      ([],FSeq)  -> MkRawCost {delay = ad * inputSize, latency = thisLatency, size = as + ins}
+      ([],Tree)  -> MkRawCost {delay = ad , latency = thisLatency, size = (as * fromInteger inputSize) + ins}
+      ([],FPipe)  -> MkRawCost {delay = inputSize, latency = thisLatency + (ad * inputSize), size = (as * fromInteger inputSize) + ins}
+      ((x, tv):xs, bbvar) ->
+        let thisCost = ndFoldCost [] x tv actionCost 0
+            thatCost = ndFoldCost xs (inputSize `div` x) bbvar actionCost inputCost
+            in
+             thisCost * thatCost
+
 computeExprCost :: Expr -> RawCost
 computeExprCost expr =
   case expr of
     Var _ ty -> computeTypeCost ty
+
     Res act input ->
       let
         inputCost = computeExprCost input
-        MkRawCost { delay = id1, latency = il1, size = is1} = inputCost
+        MkRawCost { delay = ind, latency = inl, size = ins} = inputCost
+
         outputCost = computeTypeCost (inferType expr)
         inputType = inferType input
         inputSize = sizeTy inputType
       in
         case act of
-          MOpaque _ extra _ _ rc -> rc
-            -- latency -> computation can start once the inputCost's latency + delay have been met
-            --
-            -- let
-            --   extraCost = foldl1 maxLatencySumResource $ map computeExprCost extra
-            --   inputExtraCost = maxLatencySumResource inputCost extraCost
-            --   in
-            --     Debug.Trace.trace ("cost of extra: " ++ show extraCost) $ rc + inputCost + (extraCost)  + outputCost
-          FOpaque assoc _ extra acc _ _ rc -> foldl1 maxLatencySumResource $ (map computeExprCost extra) ++  [(computeExprCost acc)] ++ [rc] -- + inputCost
-          PNDMap fctrs iact ->
-            case (fctrs,inputType) of
-              ([],Vec innerTy sz) ->
-                let MkRawCost { delay = d1, latency = l1, size = s1} = computeExprCost (Res iact (Var (MkName "foo") innerTy))
-                    in
-                      MkRawCost { delay = d1 * inputSize, latency = il1 + l1 , size = is1 + s1}
-              (x:xs,Vec innerTy sz) ->
-                if (x == sz)
-                  then
-                    let MkRawCost { delay = d1, latency = l1, size = s1} = computeExprCost (Res (PNDMap xs iact) (Var (MkName "foo") innerTy))
-                        in
-                          MkRawCost { delay = d1 * x, latency = il1 + l1 , size = is1 + (s1 * fromInteger x )}  -- FIXME: this accounts for input size at every factor, should be once
-                  else
-                    error "mismatch in map"
-              _ -> error "expecting vector"
-                    --iact * fromInteger (sizeTy $ inferType input) + inputCost
-          PNDFold fctrs iact ->
-            if isAssoc iact
-              then
-                case (fctrs,inputType) of
-                  ([],Vec innerTy sz) ->
-                    let MkRawCost { delay = d1, latency = l1, size = s1} = computeExprCost (Res iact (Var (MkName "foo") innerTy))
-                      in
-                        MkRawCost { delay = d1 * inputSize, latency = il1 + l1 , size = is1 + s1}
-                  (x:xs,Vec innerTy sz) ->
-                    if (x == sz)
-                      then
-                        let MkRawCost { delay = d1, latency = l1, size = s1} = computeExprCost (Res (PNDFold xs iact) (Var (MkName "foo") innerTy))
-                            in
-                              MkRawCost { delay = d1 * x, latency = il1 + l1 , size = is1 + (s1 * fromInteger x)} -- FIXME: this accounts for input size at every factor, should be once
-                      else
-                        error "mismatch in fold"
-                  _ -> error "expecting vector"
-              else
-                case inputType of
-                  Vec innerTy sz ->
-                    let MkRawCost { delay = d1, latency = l1, size = s1} = computeExprCost (Res iact (Var (MkName "foo") innerTy))
-                        in
-                          MkRawCost { delay = d1 * inputSize, latency = il1 + l1 , size = is1 + s1}
-                  _ -> error "expecting vector"
+          MOpaque _ extra _ _ rc ->
+            let extraCosts = map computeExprCost extra
+                finishInputTime = finishAt inputCost
+                finishExtraTimes = map finishAt extraCosts
+                thisLatency = maximum $ finishInputTime:finishExtraTimes
+                MkRawCost { delay = td, latency = tl, size = ts} = rc
+                in
+                  MkRawCost {delay = td, latency = tl + thisLatency, size = ts + ins}
 
-          NDMap vfctrs var iact ->
-            case (vfctrs,inputType) of
-                ([],Vec innerTy sz) ->
-                  let MkRawCost { delay = d1, latency = l1, size = s1} = computeExprCost (Res iact (Var (MkName "foo") innerTy))
-                    in
-                      case var of
-                        Par ->   MkRawCost { delay = d1 , latency = il1 + l1 , size = is1 + (s1 * fromInteger sz)}
-                        Pipe -> MkRawCost { delay = d1 * inputSize, latency = il1 + l1 , size = is1 + s1}
-                        Seq ->  MkRawCost { delay = d1 * inputSize, latency = il1 + l1 , size = is1 + s1}
+          FOpaque assoc _ extra acc _ _ rc ->
+            let extraCosts = map computeExprCost extra
+                finishInputTime = finishAt inputCost
+                finisAccTime = finishAt $ computeExprCost acc
+                finishExtraTimes = map finishAt extraCosts
+                thisLatency = maximum $ finishInputTime:finishExtraTimes
+                MkRawCost { delay = td, latency = tl, size = ts} = rc
+                in
+                  MkRawCost {delay = td, latency = tl + thisLatency + finisAccTime, size = ts + ins}
+          -- assume PNDMap equiv to fully seq map
 
-                (x:xs,Vec innerTy sz) ->
-                  if (fst x == sz)
-                    then
-                      let MkRawCost { delay = d1, latency = l1, size = s1} = computeExprCost (Res (NDMap xs var iact) (Var (MkName "foo") innerTy))
-                          in
-                            case snd x of
-                              Par ->  MkRawCost { delay = d1 * fst x, latency = il1 + l1 , size = is1 + (s1 * fromInteger (fst x))} -- FIXME: this accounts for input size at every factor, should be once
-                              Pipe -> MkRawCost { delay = d1 * fst x, latency = il1 + l1 , size = is1 + (s1 * fromInteger (fst x))} -- FIXME: this accounts for input size at every factor, should be once
-                              Seq ->  MkRawCost { delay = d1 * fst x, latency = il1 + l1 , size = is1 + (s1 * fromInteger (fst x))} -- FIXME: this accounts for input size at every factor, should be once
-                    else
-                      error "mismatch in fold"
-                _ -> error "expecting vector"
+          PNDMap fctrs innerAction ->
+            case innerTy fctrs inputType of
+              Nothing -> error "Type mismatch in PNDMap"
+              Just ty -> linearCost inputSize ( computeExprCost (Res innerAction (Var (MkName "foo") ty)) ) inputCost
 
-          NDFold vfctrs var iact ->
-            if isAssoc iact
-              then
-                case (vfctrs,inputType) of
-                  ([],Vec innerTy sz) ->
-                    let MkRawCost { delay = d1, latency = l1, size = s1} = computeExprCost (Res iact (Var (MkName "foo") innerTy))
-                      in
-                        case var of
-                          Tree -> MkRawCost { delay = d1 * inputSize, latency = il1 + l1 , size = is1 + s1}
-                          FPipe -> MkRawCost { delay = d1 * inputSize, latency = il1 + l1 , size = is1 + s1}
-                          FSeq -> MkRawCost { delay = d1 * inputSize, latency = il1 + l1 , size = is1 + s1}
+          PNDFold fctrs innerAction ->
+            case innerTy fctrs inputType of
+              Nothing -> error "Type mismatch in PNDFold"
+              Just ty -> linearCost inputSize ( computeExprCost (Res innerAction (Var (MkName "foo") ty)) ) inputCost
 
+          NDMap fctrs bvar innerAction ->
+            case innerTy (map fst fctrs) inputType of
+              Nothing -> error "Type mismatch in NDMap"
+              Just ty -> ndMapCost fctrs inputSize bvar ( computeExprCost (Res innerAction (Var (MkName "foo") ty)) ) inputCost
 
-                  (x:xs,Vec innerTy sz) ->
-                    if (fst x == sz)
-                      then
-                        let MkRawCost { delay = d1, latency = l1, size = s1} = computeExprCost (Res (NDFold xs var iact) (Var (MkName "foo") innerTy))
-                            in
-                              case snd x of
-                                Tree -> MkRawCost { delay = d1 * fst x, latency = il1 + l1 , size = is1 + (s1 * fromInteger (fst x))} -- FIXME: this accounts for input size at every factor, should be once
-                                FPipe -> MkRawCost { delay = d1 * fst x, latency = il1 + l1 , size = is1 + (s1 * fromInteger ( fst x))} -- FIXME: this accounts for input size at every factor, should be once
-                                FSeq -> MkRawCost { delay = d1 * fst x, latency = il1 + l1 , size = is1 + (s1 * fromInteger ( fst x))} -- FIXME: this accounts for input size at every factor, should be once
+          NDFold fctrs bvar innerAction ->
+            case innerTy (map fst fctrs) inputType of
+              Nothing -> error "Type mismatch in NDFold"
+              Just ty -> if isAssoc innerAction
+                 then ndFoldCost fctrs inputSize bvar ( computeExprCost (Res innerAction (Var (MkName "foo") ty)) ) inputCost
+                 else linearCost inputSize ( computeExprCost (Res innerAction (Var (MkName "foo") ty)) ) inputCost
 
-                      else
-                        error "mismatch in fold"
-                  _ -> error "expecting vector"
-              else
-                case inputType of
-                  Vec innerTy sz ->
-                    let MkRawCost { delay = d1, latency = l1, size = s1} = computeExprCost (Res iact (Var (MkName "foo") innerTy))
-                        in
-                          MkRawCost { delay = d1 * inputSize, latency = il1 + l1 , size = is1 + s1}
-                  _ -> error "expecting vector"
           NDSplit _ -> defaultRawCost + 2 + inputCost
           NDMerge _ -> defaultRawCost + inputCost
           NDDistr _ _ -> defaultRawCost + inputCost
           NDZipT _ -> computeTypeCost (inferType input) + inputCost
           NDUnzipT _ -> computeTypeCost (inferType input)+ inputCost
-          Compose acts -> (sum $ map computeActionCost acts) + inputCost
+          Compose acts -> defaultRawCost -- $ (sum $ map computeActionCost acts) + inputCost
           Let lhs rhs -> computeExprCost rhs + inputCost
-          Loop start stop step  act ->
-            let repeatFactor =  ( (stop - start) `div` step )
-                in
-                appendCost (computeActionCost act * fromInteger repeatFactor) inputCost
+          Loop start stop step  act ->  computeExprCost (Res act (Var (MkName "foo") inputType))  * (fromInteger ( (stop - start) `div` step )) + inputCost
 
 
     Tup xs -> sum (map computeExprCost xs)
 
 
--- computeFactoredCost :: [Integer] -> Action -> RawCost
--- computeFactoredCost factors iact = case factors of
---   [] -> computeActionCost iact * fromInteger ( sizeTy $ inferTypeOfAction iact )
---   _  -> product $ map ((computeActionCost iact *) . fromInteger)  factors
 
-computeActionCost :: Action -> RawCost
-computeActionCost act = defaultRawCost
-  -- case act of
-  -- MOpaque _ _ _ _ rc -> rc
-  -- FOpaque _ _ _ _ _ _ rc -> rc
-  -- PNDMap factors iact -> computeFactoredCost factors iact
-  -- PNDFold factors iact ->
-  --   case isAssoc iact of
-  --     True -> computeFactoredCost factors iact
-  --             -- let
-  --             --     MkRawCost { delay = d1, latency = l1, size = s1} = computeFactoredCost factors iact
-  --             --     n = case factors of
-  --             --       [] -> sizeTy $ inferType iact
-  --             --       _ -> product factors
-  --             -- in
-  --             --     MkRawCost { }
-  --     False -> computeFactoredCost factors iact
-  -- NDMap _ _ iact ->  computeActionCost iact
-  -- NDFold _ iact ->  computeActionCost iact
-  -- NDSplit _ -> defaultRawCost + 2
-  -- NDMerge _ -> defaultRawCost
-  -- NDDistr _ _ -> defaultRawCost
-  -- NDZipT _ ty -> computeTypeCost ty
-  -- NDUnzipT _ ty -> computeTypeCost ty
-  -- Compose acts -> sum $ map computeActionCost acts
-  -- Let lhs rhs -> computeExprCost rhs
-  -- Loop start stop step  act -> computeActionCost act -- * ( (stop - start) / step )
 
 
 computeCost :: Assignment -> RawCost

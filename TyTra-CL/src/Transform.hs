@@ -36,52 +36,48 @@ genAllVarF fctrs =
 
 
 mutate :: AST.Expr -> [AST.Expr]
-mutate x = concat [ Prelude.map ( \(x,y) ->  gen $ (AST.Res (AST.NDMap x y iact) input )) (genAllVar fctrs)  | ((AST.Res (AST.PNDMap fctrs iact ) input), gen )<- contexts x ]
+mutate z = concat [ Prelude.map ( \(x,y) ->  gen $ (AST.Res (AST.NDMap x y iact) input )) (genAllVar fctrs)  | ((AST.Res (AST.PNDMap fctrs iact ) input), gen )<- contexts z ]
 
 mutatef :: AST.Expr -> [AST.Expr]
-mutatef x = concat [ Prelude.map ( \(x,y) ->  gen $ (AST.Res (AST.NDFold x y iact) input )) (genAllVarF fctrs)  | ((AST.Res (AST.PNDFold fctrs iact ) input), gen )<- contexts x ]
+mutatef z = concat [ Prelude.map ( \(x,y) ->  gen $ (AST.Res (AST.NDFold x y iact) input )) (genAllVarF fctrs)  | ((AST.Res (AST.PNDFold fctrs iact ) input), gen )<- contexts z ]
 
 
 fz :: AST.Expr -> AST.Expr
 
-fz node@(AST.Res (AST.PNDMap [] iact ) input) =  -- Debug.Trace.trace ("asdf" ++ show node) $
+fz node@(AST.Res (AST.PNDMap [] _ ) input) =  -- Debug.Trace.trace ("asdf" ++ show node) $
   case inferType input of
-    (AST.Vec innerTy sz) -> fz $ Data.List.foldr (.) id ( Prelude.map (splitInputsBy) (init $ factor sz) )   $ node
+    (AST.Vec _ sz) -> fz $ Data.List.foldr (.) id ( Prelude.map splitInputsBy (init $ factor sz) )   $ node
     _ -> node
 
 fz node@(AST.Res (AST.PNDFold [] iact ) input) = -- Debug.Trace.trace ("asdf" ++ show node) $
   if AST.isAssoc iact
     then
         case inferType input of
-            (AST.Vec innerTy sz) -> fz $ Data.List.foldr (.) id ( Prelude.map (splitInputsBy) (init $ factor sz) )   $ node
+            (AST.Vec _ sz) -> fz $ Data.List.foldr (.) id ( Prelude.map splitInputsBy (init $ factor sz) )   $ node
             _ -> node
     else
         node
-fz node@(AST.Res (AST.PNDMap fctrs@(x:xs) iact ) input) =
-  let vars = genAllVar fctrs
+fz node@(AST.Res (AST.PNDMap _ _ ) _) =
+  let allVars = mutate node
+      allCosts = Prelude.map computeExprCost allVars
+      minCost = minimum allCosts
+      lll = [ z | z <- mutate node , computeExprCost z <= minCost]
       in
-        let allVars = mutate node
-            allCosts = Prelude.map computeExprCost allVars
-            minCost = minimum allCosts
-            lll = [ z | z <- mutate node , (computeExprCost z) <= minCost]
-            in
-              -- Debug.Trace.trace (show lll) $
-              head lll
-fz node@(AST.Res (AST.PNDFold fctrs@(x:xs) iact ) input) =
-  let vars = genAllVarF fctrs
+        -- Debug.Trace.trace (show lll) $
+        head lll
+fz node@(AST.Res (AST.PNDFold _ _ ) _) =
+  let allVars = mutatef node
+      allCosts = Prelude.map computeExprCost allVars
+      minCost = minimum allCosts
+      lll = [ z | z <- mutatef node , computeExprCost z <= minCost]
       in
-        let allVars = mutatef node
-            allCosts = Prelude.map computeExprCost allVars
-            minCost = minimum allCosts
-            lll = [ z | z <- mutatef node , (computeExprCost z) <= minCost]
-            in
-              -- Debug.Trace.trace (show lll) $
-              head lll
+      -- Debug.Trace.trace (show lll) $
+        head lll
 fz e = e
 
 
 inlineLets :: AST.Expr -> AST.Expr
-inlineLets (AST.Res (AST.Let lhs@(AST.Var n m) chain) rhs) = transform rpl chain
+inlineLets (AST.Res (AST.Let lhs@(AST.Var _ _) chain) rhs) = transform rpl chain
   where
       rpl l@(AST.Var _ _) = if l == lhs then rhs else l
       rpl e               = e
@@ -90,8 +86,8 @@ inlineLets e = e
 
 trComp :: AST.Expr -> AST.Expr
 --trComp (AST.Res alpha@(AST.Compose xs) chain@(AST.Res (AST.Compose ixs) innerChain)) = AST.Res (AST.Compose (xs++ixs)) innerChain
-trComp (AST.Res action chain@(AST.Res (AST.Compose xs) innerchain)) = AST.Res (AST.Compose (action:xs)) innerchain
-trComp (AST.Res action chain@(AST.Res innerAction innerChain)) = AST.Res (AST.Compose (action:[innerAction])) innerChain
+trComp (AST.Res action (AST.Res (AST.Compose xs) innerchain)) = AST.Res (AST.Compose (action:xs)) innerchain
+trComp (AST.Res action (AST.Res innerAction innerChain)) = AST.Res (AST.Compose (action:[innerAction])) innerChain
 trComp e = e
 
 
@@ -131,29 +127,29 @@ depth = para (\_ cs -> 1 + maximum (0:cs))
 splitInputsBy :: Integer -> AST.Expr -> AST.Expr
 splitInputsBy k input@(AST.Res (AST.PNDMap [] action) node) =
   case inferType node of
-    (AST.Vec inTy sz) -> if sz `mod` k == 0
+    (AST.Vec _ sz) -> if sz `mod` k == 0
       then AST.Res (AST.NDMerge [k]) $ AST.Res (AST.PNDMap [k] action) (AST.Res (AST.NDSplit [k]) node)
       else input
-    e ->   input
+    _ ->   input
 splitInputsBy k input@(AST.Res (AST.NDMerge fctrm ) ( AST.Res (AST.PNDMap fctrmap action) (AST.Res (AST.NDSplit fctrs) node) ))=
   case inferType node of
-    (AST.Vec inTy sz) -> if sz `mod` k == 0
+    (AST.Vec _ sz) -> if sz `mod` k == 0
       then AST.Res (AST.NDMerge (k:fctrm)) ( AST.Res (AST.PNDMap (k:fctrmap) action) (AST.Res (AST.NDSplit (k:fctrs)) node))
       else input
-    e ->   input
+    _ ->   input
 splitInputsBy k input@(AST.Res (AST.PNDFold [] action) node) =
   case inferType node of
-    (AST.Vec inTy sz) -> if sz `mod` k == 0 && AST.isAssoc action
+    (AST.Vec _ sz) -> if sz `mod` k == 0 && AST.isAssoc action
       then AST.Res (AST.PNDFold [k] action) (AST.Res (AST.NDSplit [k]) node)
       else input
-    e ->   input
+    _ ->   input
 splitInputsBy k input@(AST.Res (AST.PNDFold fctrmap action) (AST.Res (AST.NDSplit fctrs) node) )=
   case inferType node of
-    (AST.Vec inTy sz) -> if sz `mod` k == 0 && AST.isAssoc action
+    (AST.Vec _ sz) -> if sz `mod` k == 0 && AST.isAssoc action
       then AST.Res (AST.PNDFold (k:fctrmap) action) (AST.Res (AST.NDSplit (k:fctrs)) node)
       else input
-    e ->   input
-splitInputsBy k e = e
+    _ ->   input
+splitInputsBy _ e = e
 
 
 

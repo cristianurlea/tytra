@@ -96,6 +96,11 @@ isAssoc (Loop _ _ _ iact) = isAssoc iact
 isAssoc (Compose actions) = all isAssoc actions
 isAssoc _ = False
 
+innerTy :: [Integer] -> Type -> Maybe Type
+innerTy [] (Vec inTy sz) = Just inTy
+innerTy (x:xs) (Vec inTy sz) = if sz == x then innerTy xs inTy else Nothing
+innerTy _ _ = Nothing
+
 
 -- the fact that the LHS is also an expr is a problem for "everywhere" transformations
 data Assignment = Assign Expr Expr

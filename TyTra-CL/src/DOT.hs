@@ -140,10 +140,6 @@ actionToGr node@(AST.Let lhs rhs) = trace(show node) $ do
         return $ (lOutNodes, (lNodes ++ rNodes), rInNodes , lEdges ++ rEdges   )
 
 
-actionToGr act = do
-  nd <- findOrCreate "action"
-  return $  ([nd],[nd],[nd],[])
-
 
 chainGr   :: [GrNode] -> LNode String ->  GrNode
 chainGr [] nd =  ([nd],[nd],[nd],[])
@@ -188,13 +184,13 @@ exprToGr (AST.Res action input) =
       (lOutNodes, lNodes, lInNodes, lEdges) <- exprToGr lhs
       (rOutNodes, rNodes, rInNodes, rEdges) <- exprToGr rhs
 
-      let edgs = map (\y -> (map (\z -> createEdge y z (show $ inferType input)) lInNodes)) iOutNodes
+      let edgs = map (\y -> (map (\z -> createEdge y z  ((show (inferType input) ++ show (Cost.computeExprCost input)))) lInNodes)) iOutNodes
           in
             return $ ( rOutNodes, iNodes ++ lNodes ++ rNodes, rInNodes , rEdges ++ lEdges ++ iEdges ++ concat edgs )
     _ -> do
       (iOutNodes, iNodes, iInNodes, iEdges) <- exprToGr input
       (actOutNodes, actNodes, actInNodes, actEdges) <- actionToGr action
-      let edgs = map (\y -> (map (\z -> createEdge y z (show $ inferType input)) actInNodes)) iOutNodes
+      let edgs = map (\y -> (map (\z -> createEdge y z (show (inferType input) ++ show (Cost.computeExprCost input))) actInNodes)) iOutNodes
           in
             return $ ( actOutNodes, iNodes ++ actNodes, iInNodes , actEdges ++ iEdges ++ concat edgs )
 
@@ -211,7 +207,7 @@ toGr :: AST.Assignment -> NodeManagement (Gr String String)
 toGr (AST.Assign lhs rhs) = do
   (lOutNodes, lNodes, lInNodes, lEdges) <- exprToGr lhs
   (rOutNodes, rNodes, rInNodes, rEdges) <- exprToGr rhs
-  let edgs = map (\y -> (map (\z -> createEdge y z (show $ inferType rhs)) lInNodes)) rOutNodes
+  let edgs = map (\y -> (map (\z -> createEdge y z (show (inferType rhs) ++ show (Cost.computeExprCost rhs))) lInNodes)) rOutNodes
       in
         return $ mkGraph (lNodes ++ rNodes) $ lEdges ++ rEdges ++ (concat edgs)
 
