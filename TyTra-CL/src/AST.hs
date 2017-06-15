@@ -56,14 +56,13 @@ data Action =
     NDSplit [Integer] |
     NDMerge [Integer] |
     NDDistr [Integer] [Integer] |
-    NDZipT [Integer] | -- output type rather than input to keep things simple
-    NDUnzipT [Integer] | -- out is going to be a tuple of lists so single type
+    NDZipT [Integer] |
+    NDUnzipT [Integer] |
 
     Compose [Action] |
-    Let Expr Expr | -- lhs is variable, rhs is what it is, within outer Res
+    Let Expr Expr |
     Loop Integer Integer Integer Action
     deriving (Data, Typeable, Show, Eq, Ord)
-    --Empty -- Placeholder
 
 data Expr =
   Var Name Type
@@ -164,7 +163,7 @@ data ResourceUse = MkResourceUse {
 } deriving (Data, Eq,  Ord)
 
 instance Show ResourceUse where
-  show (MkResourceUse {luts = l, blockRams = r, multipliers = m}) = "Res:" ++ show l ++ " luts," ++ show r ++ "ram," ++ show m ++ " mult "
+  show (MkResourceUse {luts = l, blockRams = r, multipliers = m}) = "Res:" ++ show (l) ++ " luts," ++ show (r) ++ " ram," ++ show m ++ " mult "
 
 instance Num ResourceUse where
   (+)

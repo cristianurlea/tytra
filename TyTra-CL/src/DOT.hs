@@ -173,7 +173,7 @@ outNodes (lOutNodes, lNodes, lInNodes, lEdges) = lOutNodes
 
 exprToGr :: AST.Expr -> NodeManagement ([LNode String],[LNode String],[LNode String], [LEdge String])
 
-exprToGr (AST.Var (AST.MkName name) ty) = do
+exprToGr node@(AST.Var (AST.MkName name) ty) = do
   nd <- findOrCreate $ name
   return ([nd], [nd] , [nd] , [])
 
@@ -183,16 +183,15 @@ exprToGr (AST.Res action input) =
       (iOutNodes, iNodes, iInNodes, iEdges) <- exprToGr input
       (lOutNodes, lNodes, lInNodes, lEdges) <- exprToGr lhs
       (rOutNodes, rNodes, rInNodes, rEdges) <- exprToGr rhs
-
-      let edgs = map (\y -> (map (\z -> createEdge y z  ((show (inferType input) ++ show (Cost.computeExprCost input)))) lInNodes)) iOutNodes
+      let edgs = map (\y -> (map (\z -> createEdge y z  (show (inferType input) ++ show (Cost.computeExprCost input))) lInNodes)) iOutNodes
           in
-            return $ ( rOutNodes, iNodes ++ lNodes ++ rNodes, rInNodes , rEdges ++ lEdges ++ iEdges ++ concat edgs )
+            return ( rOutNodes, iNodes ++ lNodes ++ rNodes, rInNodes , rEdges ++ lEdges ++ iEdges ++ concat edgs )
     _ -> do
       (iOutNodes, iNodes, iInNodes, iEdges) <- exprToGr input
       (actOutNodes, actNodes, actInNodes, actEdges) <- actionToGr action
       let edgs = map (\y -> (map (\z -> createEdge y z (show (inferType input) ++ show (Cost.computeExprCost input))) actInNodes)) iOutNodes
           in
-            return $ ( actOutNodes, iNodes ++ actNodes, iInNodes , actEdges ++ iEdges ++ concat edgs )
+            return ( actOutNodes, iNodes ++ actNodes, iInNodes , actEdges ++ iEdges ++ concat edgs )
 
 exprToGr (AST.Tup exprs) = do
   grphs <- mapM exprToGr exprs
@@ -209,7 +208,7 @@ toGr (AST.Assign lhs rhs) = do
   (rOutNodes, rNodes, rInNodes, rEdges) <- exprToGr rhs
   let edgs = map (\y -> (map (\z -> createEdge y z (show (inferType rhs) ++ show (Cost.computeExprCost rhs))) lInNodes)) rOutNodes
       in
-        return $ mkGraph (lNodes ++ rNodes) $ lEdges ++ rEdges ++ (concat edgs)
+        return $ mkGraph (lNodes ++ rNodes) $ lEdges ++ rEdges ++ concat edgs
 
 
 

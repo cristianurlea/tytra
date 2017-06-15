@@ -34,6 +34,15 @@ genAllVarF fctrs =
             zz <- zr
             return (zip fctrs zz, pv)
 
+limits :: AST.RawCost -> AST.RawCost -> Bool
+limits toComp lmt =
+  let AST.MkRawCost { AST.delay = tcd, AST.latency = tcl, AST.size = tcs} = toComp
+      AST.MkRawCost { AST.delay = ld, AST.latency = ll, AST.size = ls} = lmt
+      in
+       tcd <= ld && tcl <= ll && tcs <= ls
+
+limit :: AST.RawCost
+limit = AST.MkRawCost { AST.delay = 100, AST.latency = 100, AST.size = 20000}
 
 mutate :: AST.Expr -> [AST.Expr]
 mutate z = concat [ Prelude.map ( \(x,y) ->  gen $ (AST.Res (AST.NDMap x y iact) input )) (genAllVar fctrs)  | ((AST.Res (AST.PNDMap fctrs iact ) input), gen )<- contexts z ]
@@ -43,37 +52,43 @@ mutatef z = concat [ Prelude.map ( \(x,y) ->  gen $ (AST.Res (AST.NDFold x y iac
 
 
 fz :: AST.Expr -> AST.Expr
+fz expr =
+  let trfmd = fz2 expr
+      in
+        if limits (computeExprCost trfmd) limit then trfmd else expr
 
-fz node@(AST.Res (AST.PNDMap [] _ ) input) =  -- Debug.Trace.trace ("asdf" ++ show node) $
+fz2 :: AST.Expr -> AST.Expr
+
+fz2 node@(AST.Res (AST.PNDMap [] _ ) input) =  -- Debug.Trace.trace ("asdf" ++ show node) $
   case inferType input of
-    (AST.Vec _ sz) -> fz $ Data.List.foldr (.) id ( Prelude.map splitInputsBy (init $ factor sz) )   $ node
+    (AST.Vec _ sz) -> fz2 $ Data.List.foldr (.) id ( Prelude.map splitInputsBy (init $ factor sz) )   $ node
     _ -> node
 
-fz node@(AST.Res (AST.PNDFold [] iact ) input) = -- Debug.Trace.trace ("asdf" ++ show node) $
+fz2 node@(AST.Res (AST.PNDFold [] iact ) input) = -- Debug.Trace.trace ("asdf" ++ show node) $
   if AST.isAssoc iact
     then
         case inferType input of
-            (AST.Vec _ sz) -> fz $ Data.List.foldr (.) id ( Prelude.map splitInputsBy (init $ factor sz) )   $ node
+            (AST.Vec _ sz) -> fz2 $ Data.List.foldr (.) id ( Prelude.map splitInputsBy (init $ factor sz) )   $ node
             _ -> node
     else
         node
-fz node@(AST.Res (AST.PNDMap _ _ ) _) =
+fz2 node@(AST.Res (AST.PNDMap _ _ ) _) =
   let allVars = mutate node
       allCosts = Prelude.map computeExprCost allVars
       minCost = minimum allCosts
-      lll = [ z | z <- mutate node , computeExprCost z <= minCost]
+      lll = [ z | z <- mutate node , computeExprCost z <= minCost ]
       in
         -- Debug.Trace.trace (show lll) $
         head lll
-fz node@(AST.Res (AST.PNDFold _ _ ) _) =
+fz2 node@(AST.Res (AST.PNDFold _ _ ) _) =
   let allVars = mutatef node
       allCosts = Prelude.map computeExprCost allVars
       minCost = minimum allCosts
-      lll = [ z | z <- mutatef node , computeExprCost z <= minCost]
+      lll = [ z | z <- mutatef node , computeExprCost z <= minCost ]
       in
-      -- Debug.Trace.trace (show lll) $
+        Debug.Trace.trace (show lll) $
         head lll
-fz e = e
+fz2 e = e
 
 
 inlineLets :: AST.Expr -> AST.Expr
@@ -206,7 +221,7 @@ applyTransformChain transforms (AST.Assign lhs rhs ) =
 
 
 
-canonicalChain = applyTransformChain    [cleanup, inlineLets.  inlineLets]
-transformChain = applyTransformChain    [cleanup, splitInputsBy 2, inlineLets, inlineLets]
-transformChain2 = applyTransformChain   [fz . depthOp 1 4 (splitInputsBy 8), splitInputsBy 2, inlineLets]
-transformChainClean = applyTransformChain   [cleanup , fz , inlineLets]
+-- canonicalChain = applyTransformChain    [cleanup, inlineLets.  inlineLets]
+-- transformChain = applyTransformChain    [cleanup, splitInputsBy 2, inlineLets, inlineLets]
+-- transformChain2 = applyTransformChain   [fz . depthOp 1 4 (splitInputsBy 8), splitInputsBy 2, inlineLets]
+-- transformChainClean = applyTransformChain   [cleanup , fz , inlineLets]

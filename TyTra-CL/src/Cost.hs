@@ -86,10 +86,11 @@ ndMapCost fctrs inputSize bvar actionCost inputCost =
           ([],Seq)  -> MkRawCost {delay = ad * inputSize, latency = thisLatency, size = as + ins}
           ([],Par)  -> MkRawCost {delay = ad , latency = thisLatency, size = (as * fromInteger inputSize) + ins}
           ([],Pipe)  -> MkRawCost {delay = inputSize, latency = thisLatency + (ad * inputSize), size = (as * fromInteger inputSize) + ins}
-          ((x, tv):xs, bbvar) -> let thisCost = ndMapCost [] x tv actionCost 0
-                                     thatCost = ndMapCost xs (inputSize `div` x) bbvar actionCost inputCost
+          ((x, tv):xs, bbvar) -> let thatCost = ndMapCost xs (inputSize `div` x) bbvar actionCost inputCost
+                                     thisCost = ndMapCost [] x tv thatCost 0
                                      in
-                                          thisCost * thatCost
+                                      -- Debug.Trace.trace (show thisCost ++ " * " ++ show thatCost ++ " s" ++ show inputSize) $
+                                      thisCost
 
 
 ndFoldCost :: [(Integer, FVariant)] -> Integer -> FVariant -> RawCost -> RawCost -> RawCost
@@ -99,16 +100,17 @@ ndFoldCost fctrs inputSize bvar actionCost inputCost =
     MkRawCost { delay = ind, latency = inl, size = ins} = inputCost
     finishInputTime = finishAt inputCost
     thisLatency = maximum [finishInputTime, al]
-    in
+    in --Debug.Trace.trace (show actionCost ++ " " ++ show inputSize) $
       case (fctrs, bvar) of
       ([],FSeq)  -> MkRawCost {delay = ad * inputSize, latency = thisLatency, size = as + ins}
       ([],Tree)  -> MkRawCost {delay = ad , latency = thisLatency, size = (as * fromInteger inputSize) + ins}
       ([],FPipe)  -> MkRawCost {delay = inputSize, latency = thisLatency + (ad * inputSize), size = (as * fromInteger inputSize) + ins}
       ((x, tv):xs, bbvar) ->
-        let thisCost = ndFoldCost [] x tv actionCost 0
-            thatCost = ndFoldCost xs (inputSize `div` x) bbvar actionCost inputCost
+        let thatCost = ndFoldCost xs (inputSize `div` x) bbvar actionCost inputCost
+            thisCost = ndFoldCost [] x tv thatCost 0
             in
-             thisCost * thatCost
+             --Debug.Trace.trace (show thisCost ++ " * " ++ show thatCost) $
+             thisCost
 
 computeExprCost :: Expr -> RawCost
 computeExprCost expr =
@@ -184,7 +186,7 @@ computeExprCost expr =
 
 
 computeCost :: Assignment -> RawCost
-computeCost (Assign lhs rhs) = computeExprCost rhs + computeExprCost lhs
+computeCost (Assign lhs rhs) = computeExprCost rhs -- + computeExprCost lhs
 
 
 
